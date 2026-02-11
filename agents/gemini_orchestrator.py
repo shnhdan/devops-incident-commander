@@ -15,7 +15,7 @@ load_dotenv()
 
 # Configure Gemini
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Elasticsearch client
 es = Elasticsearch(
@@ -37,106 +37,139 @@ class IncidentCommander:
         }
     
     def detect_error_spikes(self, time_window="1 hour", threshold=10):
-        """Execute ES|QL query to detect error spikes"""
-        query = f"""
-        FROM app-logs
-        | WHERE @timestamp > NOW() - {time_window}
-        | WHERE severity IN ("ERROR", "CRITICAL")
-        | STATS error_count = COUNT(*) BY service_name, error_code
-        | WHERE error_count > {threshold}
-        | SORT error_count DESC
-        | LIMIT 20
-        """
-        
-        try:
-            result = es.esql.query(query=query)
-            return {
-                'success': True,
-                'data': result['values'],
-                'columns': [col['name'] for col in result['columns']]
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+    """Execute ES|QL query to detect error spikes"""
+    
+    # Convert time_window to ES|QL format
+    time_map = {
+        "1 hour": "1h",
+        "30 minutes": "30m",
+        "24 hours": "24h",
+        "1h": "1h",
+        "30m": "30m"
+    }
+    esql_time = time_map.get(time_window, "1h")
+    
+    query = f"""
+    FROM app-logs
+    | WHERE @timestamp > NOW() - {esql_time}
+    | WHERE severity IN ("ERROR", "CRITICAL")
+    | STATS error_count = COUNT(*) BY service_name, error_code
+    | WHERE error_count > {threshold}
+    | SORT error_count DESC
+    | LIMIT 20
+    """
+    
+    try:
+        result = es.esql.query(query=query)
+        return {
+            'success': True,
+            'data': result['values'],
+            'columns': [col['name'] for col in result['columns']]
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
     
     def detect_metric_anomalies(self, time_window="1 hour"):
-        """Execute ES|QL query to detect metric anomalies"""
-        query = f"""
-        FROM system-metrics
-        | WHERE @timestamp > NOW() - {time_window}
-        | STATS 
-            avg_value = AVG(value),
-            max_value = MAX(value),
-            count = COUNT(*)
-          BY service_name, metric_name
-        | WHERE 
-            (metric_name == "cpu_usage" AND max_value > 85) OR
-            (metric_name == "memory_usage" AND max_value > 85) OR
-            (metric_name == "request_latency" AND max_value > 2000) OR
-            (metric_name == "error_rate" AND max_value > 5)
-        | SORT max_value DESC
-        """
-        
-        try:
-            result = es.esql.query(query=query)
-            return {
-                'success': True,
-                'data': result['values'],
-                'columns': [col['name'] for col in result['columns']]
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+    """Execute ES|QL query to detect metric anomalies"""
+    
+    # Convert time_window to ES|QL format
+    time_map = {
+        "1 hour": "1h",
+        "30 minutes": "30m",
+        "24 hours": "24h",
+        "1h": "1h",
+        "30m": "30m"
+    }
+    esql_time = time_map.get(time_window, "1h")
+    
+    query = f"""
+    FROM system-metrics
+    | WHERE @timestamp > NOW() - {esql_time}
+    | STATS 
+        avg_value = AVG(value),
+        max_value = MAX(value),
+        count = COUNT(*)
+      BY service_name, metric_name
+    | WHERE 
+        (metric_name == "cpu_usage" AND max_value > 85) OR
+        (metric_name == "memory_usage" AND max_value > 85) OR
+        (metric_name == "request_latency" AND max_value > 2000) OR
+        (metric_name == "error_rate" AND max_value > 5)
+    | SORT max_value DESC
+    """
+    
+    try:
+        result = es.esql.query(query=query)
+        return {
+            'success': True,
+            'data': result['values'],
+            'columns': [col['name'] for col in result['columns']]
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
     
     def analyze_with_enrichment(self, time_window="1 hour"):
-        """Analyze incidents and enrich with service inventory"""
-        query = f"""
-        FROM app-logs
-        | WHERE @timestamp > NOW() - {time_window}
-        | WHERE severity == "CRITICAL"
-        | STATS 
-            error_count = COUNT(*),
-            first_seen = MIN(@timestamp),
-            last_seen = MAX(@timestamp),
-            affected_hosts = COUNT_DISTINCT(host)
-          BY service_name, error_code
-        | WHERE error_count > 5
-        | SORT error_count DESC
-        | LIMIT 10
-        """
+    """Analyze incidents and enrich with service inventory"""
+    
+    # Convert time_window to ES|QL format
+    time_map = {
+        "1 hour": "1h",
+        "30 minutes": "30m",
+        "24 hours": "24h",
+        "1h": "1h",
+        "30m": "30m"
+    }
+    esql_time = time_map.get(time_window, "1h")
+    
+    query = f"""
+    FROM app-logs
+    | WHERE @timestamp > NOW() - {esql_time}
+    | WHERE severity == "CRITICAL"
+    | STATS 
+        error_count = COUNT(*),
+        first_seen = MIN(@timestamp),
+        last_seen = MAX(@timestamp),
+        affected_hosts = COUNT_DISTINCT(host)
+      BY service_name, error_code
+    | WHERE error_count > 5
+    | SORT error_count DESC
+    | LIMIT 10
+    """
+    
+    try:
+        result = es.esql.query(query=query)
         
-        try:
-            result = es.esql.query(query=query)
+        # Enrich with service inventory
+        enriched_data = []
+        for row in result['values']:
+            service_name = row[0]
             
-            # Enrich with service inventory
-            enriched_data = []
-            for row in result['values']:
-                service_name = row[0]
-                
-                # Get service info
-                service_info = es.search(
-                    index='service-inventory',
-                    body={'query': {'term': {'service_name': service_name}}}
-                )
-                
-                if service_info['hits']['total']['value'] > 0:
-                    service = service_info['hits']['hits'][0]['_source']
-                    enriched_row = row + [
-                        service.get('team', 'unknown'),
-                        service.get('oncall_slack_channel', 'unknown'),
-                        service.get('criticality', 'unknown')
-                    ]
-                else:
-                    enriched_row = row + ['unknown', 'unknown', 'unknown']
-                
-                enriched_data.append(enriched_row)
+            # Get service info
+            service_info = es.search(
+                index='service-inventory',
+                body={'query': {'term': {'service_name': service_name}}}
+            )
             
-            return {
-                'success': True,
-                'data': enriched_data,
-                'columns': [col['name'] for col in result['columns']] + 
-                          ['team', 'slack_channel', 'criticality']
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+            if service_info['hits']['total']['value'] > 0:
+                service = service_info['hits']['hits'][0]['_source']
+                enriched_row = row + [
+                    service.get('team', 'unknown'),
+                    service.get('oncall_slack_channel', 'unknown'),
+                    service.get('criticality', 'unknown')
+                ]
+            else:
+                enriched_row = row + ['unknown', 'unknown', 'unknown']
+            
+            enriched_data.append(enriched_row)
+        
+        return {
+            'success': True,
+            'data': enriched_data,
+            'columns': [col['name'] for col in result['columns']] + 
+                      ['team', 'slack_channel', 'criticality']
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
     
     def search_runbooks(self, search_term):
         """Search runbooks using Elasticsearch"""
