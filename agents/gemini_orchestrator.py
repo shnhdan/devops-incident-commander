@@ -13,7 +13,7 @@ from ollama import Client
 
 load_dotenv()
 
-OLLAMA_MODEL = "phi3:mini"
+OLLAMA_MODEL = "tinyllama"
 ollama_client = Client(host="http://127.0.0.1:11434")
 
 es = Elasticsearch(
@@ -87,11 +87,15 @@ def generate_local(prompt):
         response = ollama_client.generate(
             model=OLLAMA_MODEL,
             prompt=prompt,
-            options={"num_predict": 300},
+            options={
+                "num_predict": 200,
+                "num_ctx": 512
+            }
         )
         return response.get("response", "")
     except Exception as e:
         return f"LLM Error: {e}"
+
 
 
 # --------------------------------------------------
