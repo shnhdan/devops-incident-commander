@@ -6,19 +6,21 @@ from dotenv import load_dotenv
 import os
 import sys
 
+
 def get_es_client():
     """Get configured Elasticsearch client"""
     load_dotenv()
     return Elasticsearch(
-        os.getenv('ELASTIC_ENDPOINT'),
-        basic_auth=(os.getenv('ELASTIC_USERNAME'), os.getenv('ELASTIC_PASSWORD')),
-        verify_certs=True
+        os.getenv("ELASTIC_ENDPOINT"),
+        basic_auth=(os.getenv("ELASTIC_USERNAME"), os.getenv("ELASTIC_PASSWORD")),
+        verify_certs=True,
     )
+
 
 def create_indices():
     """Create all required indices"""
     es = get_es_client()
-    
+
     indices = {
         "app-logs": {
             "mappings": {
@@ -29,7 +31,7 @@ def create_indices():
                     "message": {"type": "text"},
                     "error_code": {"type": "keyword"},
                     "host": {"type": "keyword"},
-                    "trace_id": {"type": "keyword"}
+                    "trace_id": {"type": "keyword"},
                 }
             }
         },
@@ -40,7 +42,7 @@ def create_indices():
                     "service_name": {"type": "keyword"},
                     "metric_name": {"type": "keyword"},
                     "value": {"type": "float"},
-                    "host": {"type": "keyword"}
+                    "host": {"type": "keyword"},
                 }
             }
         },
@@ -53,7 +55,7 @@ def create_indices():
                     "severity": {"type": "keyword"},
                     "solution": {"type": "text"},
                     "commands": {"type": "text"},
-                    "last_updated": {"type": "date"}
+                    "last_updated": {"type": "date"},
                 }
             }
         },
@@ -64,21 +66,22 @@ def create_indices():
                     "team": {"type": "keyword"},
                     "oncall_slack_channel": {"type": "keyword"},
                     "pagerduty_service_id": {"type": "keyword"},
-                    "criticality": {"type": "keyword"}
+                    "criticality": {"type": "keyword"},
                 }
             }
-        }
+        },
     }
-    
+
     for index_name, config in indices.items():
         if es.indices.exists(index=index_name):
             print(f"⚠️  Index '{index_name}' exists, deleting...")
             es.indices.delete(index=index_name)
-        
+
         es.indices.create(index=index_name, body=config)
         print(f"✅ Created index: {index_name}")
-    
+
     print(f"\n🎉 Successfully created {len(indices)} indices!")
+
 
 if __name__ == "__main__":
     try:

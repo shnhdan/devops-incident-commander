@@ -276,9 +276,11 @@ document.getElementById("query").addEventListener("keypress", function(e) {
 </html>
 """
 
+
 @app.route("/")
 def home():
     return render_template_string(HTML)
+
 
 @app.route("/query", methods=["POST"])
 def query():
@@ -286,6 +288,7 @@ def query():
     user_query = data.get("query", "")
     result = commander.decide_and_execute(user_query)
     return jsonify({"response": result["response"]})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)

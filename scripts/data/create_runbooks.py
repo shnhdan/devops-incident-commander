@@ -5,13 +5,15 @@ from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
 import os
 
+
 def get_es_client():
     load_dotenv()
     return Elasticsearch(
-        os.getenv('ELASTIC_ENDPOINT'),
-        basic_auth=(os.getenv('ELASTIC_USERNAME'), os.getenv('ELASTIC_PASSWORD')),
-        verify_certs=True
+        os.getenv("ELASTIC_ENDPOINT"),
+        basic_auth=(os.getenv("ELASTIC_USERNAME"), os.getenv("ELASTIC_PASSWORD")),
+        verify_certs=True,
     )
+
 
 RUNBOOKS = [
     {
@@ -40,7 +42,7 @@ Step 5: Monitor recovery
    kubectl logs -f deployment/payment-service | grep "Connected to database"
         """,
         "commands": "kubectl get pods -n database; kubectl logs -f deployment/payment-service",
-        "last_updated": "2025-01-15T00:00:00Z"
+        "last_updated": "2025-01-15T00:00:00Z",
     },
     {
         "title": "High Memory Usage - OOM Recovery",
@@ -67,7 +69,7 @@ Step 5: Monitor after restart
    Check for memory leaks in application code
         """,
         "commands": "kubectl top pods; kubectl exec api-gateway-xxx -- jmap -dump",
-        "last_updated": "2025-01-15T00:00:00Z"
+        "last_updated": "2025-01-15T00:00:00Z",
     },
     {
         "title": "API Rate Limit Exceeded Response",
@@ -96,7 +98,7 @@ Step 5: Notify customer success team
    If affecting paying customer, create support ticket
         """,
         "commands": "grep 'RateLimitExceeded' /var/log/nginx/access.log | head -20",
-        "last_updated": "2025-01-15T00:00:00Z"
+        "last_updated": "2025-01-15T00:00:00Z",
     },
     {
         "title": "Authentication Service Failure Recovery",
@@ -126,7 +128,7 @@ Step 6: Monitor authentication success rate
    Should return to >99% within 2 minutes
         """,
         "commands": "curl http://auth-service/health; kubectl rollout restart deployment/auth-service",
-        "last_updated": "2025-01-15T00:00:00Z"
+        "last_updated": "2025-01-15T00:00:00Z",
     },
     {
         "title": "High Request Latency Troubleshooting",
@@ -162,22 +164,24 @@ Step 6: Review recent deployments
    Consider rollback if regression introduced
         """,
         "commands": "tail -f /var/log/mysql/slow-query.log; redis-cli INFO stats",
-        "last_updated": "2025-01-15T00:00:00Z"
-    }
+        "last_updated": "2025-01-15T00:00:00Z",
+    },
 ]
+
 
 def main():
     print("Creating runbook knowledge base...")
     es = get_es_client()
-    
+
     for runbook in RUNBOOKS:
         es.index(index="runbooks", document=runbook)
         print(f"✅ Indexed: {runbook['title']}")
-    
+
     es.indices.refresh(index="runbooks")
-    
+
     count = es.count(index="runbooks")
     print(f"\n🎉 Successfully created {count['count']} runbooks!")
+
 
 if __name__ == "__main__":
     main()
