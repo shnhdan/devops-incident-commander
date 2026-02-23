@@ -213,7 +213,7 @@ Respond JSON:
         tool_map = {
             "detect_errors": self.detect_error_spikes,
             "detect_metrics": self.detect_metric_anomalies,
-            "data_pipeline_health": self.data_pipeline_health
+            "data_pipeline_health": self.data_pipeline_health,
             "ingestion_trend_analysis": self.ingestion_trend_analysis,
         }
 
