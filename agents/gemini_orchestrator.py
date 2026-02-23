@@ -28,6 +28,8 @@ es = Elasticsearch(
 # --------------------------------------------------
 # Slack
 # --------------------------------------------------
+
+
 def send_slack_notification(message):
     webhook = os.getenv("SLACK_WEBHOOK_URL")
     if not webhook:
@@ -43,38 +45,24 @@ def send_slack_notification(message):
         severity = "WARNING"
         color = "#f59e0b"
 
-    payload = {
-        "attachments": [
-            {
-                "color": color,
-                "blocks": [
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": f"🚨 Incident Report - {severity}",
-                        },
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": message,
-                        },
-                    },
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": f"Generated at {datetime.utcnow()} UTC",
-                            }
-                        ],
-                    },
-                ],
-            }
-        ]
-    }
+    payload = {"attachments": [{"color": color,
+                                "blocks": [{"type": "header",
+                                            "text": {"type": "plain_text",
+                                                     "text": f"🚨 Incident Report - {severity}",
+                                                     },
+                                            },
+                                           {"type": "section",
+                                            "text": {"type": "mrkdwn",
+                                                     "text": message,
+                                                     },
+                                            },
+                                           {"type": "context",
+                                            "elements": [{"type": "mrkdwn",
+                                                          "text": f"Generated at {datetime.utcnow()} UTC",
+                                                          }],
+                                            },
+                                           ],
+                                }]}
 
     requests.post(webhook, json=payload)
 
@@ -95,7 +83,6 @@ def generate_local(prompt):
         return response.get("response", "")
     except Exception as e:
         return f"LLM Error: {e}"
-
 
 
 # --------------------------------------------------
@@ -145,6 +132,59 @@ class IncidentCommander:
         return pipeline_data
 
     # --------------------------------------------------
+
+    def ingestion_trend_analysis(self):
+        """
+        Compare ingestion: last 24h vs previous 24h
+        Detect pipeline drops or spikes
+        """
+
+    indices = ["app-logs", "system-metrics"]
+
+    trend_data = []
+
+    for index in indices:
+        try:
+            query = f"""
+            FROM {index}
+            | WHERE @timestamp > NOW() - 48h
+            | EVAL period = CASE(
+                @timestamp > NOW() - 24h, "last_24h",
+                "prev_24h"
+              )
+            | STATS count = COUNT(*) BY period
+            """
+
+            result = es.esql.query(query=query)
+
+            last_24h = 0
+            prev_24h = 0
+
+            for row in result["values"]:
+                if row[0] == "last_24h":
+                    last_24h = row[1]
+                elif row[0] == "prev_24h":
+                    prev_24h = row[1]
+
+            change = 0
+            if prev_24h > 0:
+                change = ((last_24h - prev_24h) / prev_24h) * 100
+
+            trend_data.append({
+                "index": index,
+                "last_24h": last_24h,
+                "prev_24h": prev_24h,
+                "percent_change": round(change, 2)
+            })
+
+        except Exception as e:
+            trend_data.append({
+                "index": index,
+                "error": str(e)
+            })
+
+    return trend_data
+
     # Orchestration
     # --------------------------------------------------
     def decide_and_execute(self, user_query):
@@ -156,6 +196,7 @@ Choose one tool:
 - detect_errors
 - detect_metrics
 - data_pipeline_health
+- ingestion_trend_analysis
 
 Respond JSON:
 {{ "tool": "tool_name" }}
@@ -166,13 +207,14 @@ Respond JSON:
         try:
             decision = json.loads(decision_text)
             tool = decision.get("tool", "detect_errors")
-        except:
+        except BaseException:
             tool = "detect_errors"
 
         tool_map = {
             "detect_errors": self.detect_error_spikes,
             "detect_metrics": self.detect_metric_anomalies,
-            "data_pipeline_health": self.data_pipeline_health,
+            "data_pipeline_health": self.data_pipeline_health
+            "ingestion_trend_analysis": self.ingestion_trend_analysis,
         }
 
         results = tool_map.get(tool, self.detect_error_spikes)()

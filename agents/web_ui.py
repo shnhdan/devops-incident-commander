@@ -4,7 +4,7 @@ from gemini_orchestrator import IncidentCommander
 app = Flask(__name__)
 commander = IncidentCommander()
 
-HTML = """
+HTML = """ 
 <!DOCTYPE html>
 <html>
 <head>
@@ -133,7 +133,7 @@ button:hover {
 <div class="container">
 
     <div class="card">
-        <h3>Run Analysis</h3>
+     <h3>Run Analysis</h3>
         <textarea id="query" placeholder="Ask about incidents, metrics, or pipeline health..."></textarea>
         <button onclick="sendQuery()">Analyze</button>
 
@@ -141,15 +141,16 @@ button:hover {
             <button onclick="setQuery('Check for error spikes')">Error Spikes</button>
             <button onclick="setQuery('Show metric anomalies')">Metric Anomalies</button>
             <button onclick="setQuery('Check data pipeline health')">Pipeline Health</button>
+            <button onclick="setQuery('Analyze ingestion trend')">Ingestion Trend</button>
         </div>
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            Processing...
-        </div>
+               Processing...
+               </div>
 
         <div id="response" class="response"></div>
-    </div>
+     </div>
 
 </div>
 
@@ -175,27 +176,63 @@ async function sendQuery() {
 
     document.getElementById("loading").style.display = "none";
 
-    let responseDiv = document.getElementById("response");
-    responseDiv.innerText = data.response;
+            let responseDiv = document.getElementById("response");
 
-    // Severity highlight
-    if (data.response.includes("CRITICAL")) {
-        responseDiv.style.borderLeft = "5px solid #dc2626";
-    } else if (data.response.includes("WARNING")) {
-        responseDiv.style.borderLeft = "5px solid #f59e0b";
-    } else {
-        responseDiv.style.borderLeft = "5px solid #2563eb";
-    }
-}
+            try {
+            let parsed = JSON.parse(data.response);
+
+            if (Array.isArray(parsed) && parsed[0].percent_change !== undefined) {
+            let html = "";
+
+            parsed.forEach(item => {
+            let color = "#2563eb";
+
+            if (item.percent_change < -30) {
+            color = "#dc2626";
+            } else if (item.percent_change > 30) {
+            color = "#16a34a";
+            }
+
+            html += `
+            <div style="margin-bottom:15px; padding:15px; background:#0f172a; border-left:5px solid ${color}; border-radius:6px;">
+            <strong>${item.index}</strong><br>
+            Last 24h: ${item.last_24h}<br>
+            Previous 24h: ${item.prev_24h}<br>
+            Change: ${item.percent_change}%
+            </div>`;
+            });
+
+            responseDiv.innerHTML = html;
+            return;
+            }
+
+            } catch (e) {
+            // Not JSON → continue normal rendering
+            }
+
+            responseDiv.innerText = data.response;
+
+            // Severity styling for normal responses
+            if (data.response.includes("CRITICAL")) {
+            responseDiv.style.borderLeft = "5px solid #dc2626";
+            } else if (data.response.includes("WARNING")) {
+            responseDiv.style.borderLeft = "5px solid #f59e0b";
+            } else {
+            responseDiv.style.borderLeft = "5px solid #2563eb";
+            }
+
+            }
 </script>
 
 </body>
 </html>
-"""
+
+""" 
 
 @app.route("/")
 def home():
     return render_template_string(HTML)
+
 
 @app.route("/query", methods=["POST"])
 def query():
@@ -203,6 +240,7 @@ def query():
     user_query = data.get("query", "")
     result = commander.decide_and_execute(user_query)
     return jsonify({"response": result})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
