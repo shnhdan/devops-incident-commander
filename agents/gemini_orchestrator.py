@@ -25,11 +25,10 @@ es = Elasticsearch(
     verify_certs=True,
 )
 
+
 # --------------------------------------------------
 # Slack
 # --------------------------------------------------
-
-
 def send_slack_notification(message):
     webhook = os.getenv("SLACK_WEBHOOK_URL")
     if not webhook:
@@ -45,24 +44,22 @@ def send_slack_notification(message):
         severity = "WARNING"
         color = "#f59e0b"
 
-    payload = {"attachments": [{"color": color,
-                                "blocks": [{"type": "header",
-                                            "text": {"type": "plain_text",
-                                                     "text": f"🚨 Incident Report - {severity}",
-                                                     },
-                                            },
-                                           {"type": "section",
-                                            "text": {"type": "mrkdwn",
-                                                     "text": message,
-                                                     },
-                                            },
-                                           {"type": "context",
-                                            "elements": [{"type": "mrkdwn",
-                                                          "text": f"Generated at {datetime.utcnow()} UTC",
-                                                          }],
-                                            },
-                                           ],
-                                }]}
+    payload = {
+        "attachments": [{
+            "color": color,
+            "blocks": [
+                {"type": "header",
+                 "text": {"type": "plain_text",
+                          "text": f"🚨 Incident Report - {severity}"}},
+                {"type": "section",
+                 "text": {"type": "mrkdwn",
+                          "text": message}},
+                {"type": "context",
+                 "elements": [{"type": "mrkdwn",
+                               "text": f"Generated at {datetime.utcnow()} UTC"}]}
+            ]
+        }]
+    }
 
     requests.post(webhook, json=payload)
 
@@ -75,10 +72,7 @@ def generate_local(prompt):
         response = ollama_client.generate(
             model=OLLAMA_MODEL,
             prompt=prompt,
-            options={
-                "num_predict": 200,
-                "num_ctx": 512
-            }
+            options={"num_predict": 200, "num_ctx": 512}
         )
         return response.get("response", "")
     except Exception as e:
@@ -89,8 +83,6 @@ def generate_local(prompt):
 # Incident Commander
 # --------------------------------------------------
 class IncidentCommander:
-
-    # ----------- Incident Tools -------------
 
     def detect_error_spikes(self):
         query = """
@@ -109,82 +101,62 @@ class IncidentCommander:
         """
         return es.esql.query(query=query)["values"]
 
-    # ----------- Data Engineering Tool -------------
-
     def data_pipeline_health(self):
-        """
-        Data Engineer feature:
-        Detect ingestion drop or abnormal pipeline activity.
-        """
         indices = es.cat.indices(format="json")
 
-        pipeline_data = []
+        results = []
         for index in indices:
-            docs = int(index.get("docs.count", 0))
-            store = index.get("store.size", "0b")
-
-            pipeline_data.append({
+            results.append({
                 "index": index["index"],
-                "doc_count": docs,
-                "store_size": store
+                "doc_count": int(index.get("docs.count", 0)),
+                "store_size": index.get("store.size", "0b")
             })
-
-        return pipeline_data
-
-    # --------------------------------------------------
+        return results
 
     def ingestion_trend_analysis(self):
-        """
-        Compare ingestion: last 24h vs previous 24h
-        Detect pipeline drops or spikes
-        """
+        indices = ["app-logs", "system-metrics"]
+        trend_data = []
 
-    indices = ["app-logs", "system-metrics"]
+        for index in indices:
+            try:
+                query = f"""
+                FROM {index}
+                | WHERE @timestamp > NOW() - 48h
+                | EVAL period = CASE(
+                    @timestamp > NOW() - 24h, "last_24h",
+                    "prev_24h"
+                  )
+                | STATS count = COUNT(*) BY period
+                """
 
-    trend_data = []
+                result = es.esql.query(query=query)
 
-    for index in indices:
-        try:
-            query = f"""
-            FROM {index}
-            | WHERE @timestamp > NOW() - 48h
-            | EVAL period = CASE(
-                @timestamp > NOW() - 24h, "last_24h",
-                "prev_24h"
-              )
-            | STATS count = COUNT(*) BY period
-            """
+                last_24h = 0
+                prev_24h = 0
 
-            result = es.esql.query(query=query)
+                for row in result["values"]:
+                    if row[0] == "last_24h":
+                        last_24h = row[1]
+                    elif row[0] == "prev_24h":
+                        prev_24h = row[1]
 
-            last_24h = 0
-            prev_24h = 0
+                change = 0
+                if prev_24h > 0:
+                    change = ((last_24h - prev_24h) / prev_24h) * 100
 
-            for row in result["values"]:
-                if row[0] == "last_24h":
-                    last_24h = row[1]
-                elif row[0] == "prev_24h":
-                    prev_24h = row[1]
+                trend_data.append({
+                    "index": index,
+                    "last_24h": last_24h,
+                    "prev_24h": prev_24h,
+                    "percent_change": round(change, 2)
+                })
 
-            change = 0
-            if prev_24h > 0:
-                change = ((last_24h - prev_24h) / prev_24h) * 100
+            except Exception as e:
+                trend_data.append({"index": index, "error": str(e)})
 
-            trend_data.append({
-                "index": index,
-                "last_24h": last_24h,
-                "prev_24h": prev_24h,
-                "percent_change": round(change, 2)
-            })
+        return trend_data
 
-        except Exception as e:
-            trend_data.append({
-                "index": index,
-                "error": str(e)
-            })
-
-    return trend_data
-
+    # --------------------------------------------------
     # Orchestration
     # --------------------------------------------------
     def decide_and_execute(self, user_query):
@@ -207,7 +179,7 @@ Respond JSON:
         try:
             decision = json.loads(decision_text)
             tool = decision.get("tool", "detect_errors")
-        except BaseException:
+        except Exception:
             tool = "detect_errors"
 
         tool_map = {
@@ -232,7 +204,6 @@ If errors high, mark CRITICAL.
 
         summary = generate_local(summary_prompt)
 
-        # Slack trigger
         send_slack_notification(summary)
 
         return summary
